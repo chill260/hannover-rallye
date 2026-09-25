@@ -28,6 +28,22 @@ async function dbLoadState() {
     return false;
   }
 
+  const { data: stationDefs, error: stationDefsError } = await rallySupabase
+    .from("stations")
+    .select("station_index,name,latitude,longitude,radius_m")
+    .order("station_index");
+
+  if (stationDefsError) throw stationDefsError;
+
+  for (const row of stationDefs || []) {
+    if (TARGETS[row.station_index]) {
+      TARGETS[row.station_index].name = row.name;
+      TARGETS[row.station_index].lat = row.latitude;
+      TARGETS[row.station_index].lon = row.longitude;
+      TARGETS[row.station_index].radius = row.radius_m;
+    }
+  }
+
   const { data: teamProgress, error: teamError } = await rallySupabase
     .from("team_progress")
     .select("current_station,hints,attempts,finished")
