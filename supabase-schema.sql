@@ -1,5 +1,7 @@
 -- Hannover City Challenge - Supabase/PostgreSQL schema
--- Run this once in the Supabase SQL Editor.
+create schema if not exists private;
+revoke all on schema private from public;
+grant usage on schema private to authenticated;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -33,13 +35,11 @@ insert into public.team_progress(team)
 values ('A'), ('B')
 on conflict (team) do nothing;
 
--- Automatically create a profile for manually created Auth users.
--- Expected usernames/email local-parts: team-a, team-b, orga
-create or replace function public.handle_rally_user()
+create or replace function private.handle_rally_user()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, private
 as $$
 declare
   uname text;
@@ -50,11 +50,7 @@ begin
   values (
     new.id,
     uname,
-    case
-      when uname = 'team-a' then 'A'
-      when uname = 'team-b' then 'B'
-      else null
-    end,
+    case when uname = 'team-a' then 'A' when uname = 'team-b' then 'B' else null end,
     case when uname = 'orga' then 'admin' else 'player' end
   )
   on conflict (id) do nothing;
@@ -66,47 +62,33 @@ $$;
 drop trigger if exists on_rally_user_created on auth.users;
 create trigger on_rally_user_created
 after insert on auth.users
-for each row execute procedure public.handle_rally_user();
+for each row execute procedure private.handle_rally_user();
 
--- Backfill matching users if they already existed before this schema.
-insert into public.profiles(id, username, team, role)
-select
-  id,
-  split_part(email, '@', 1),
-  case
-    when split_part(email, '@', 1) = 'team-a' then 'A'
-    when split_part(email, '@', 1) = 'team-b' then 'B'
-    else null
-  end,
-  case when split_part(email, '@', 1) = 'orga' then 'admin' else 'player' end
-from auth.users
-where split_part(email, '@', 1) in ('team-a','team-b','orga')
-on conflict (id) do nothing;
-
-create or replace function public.rally_team()
+create or replace function private.rally_team()
 returns text
 language sql
 stable
 security definer
-set search_path = public
+set search_path = public, private
 as $$
   select team from public.profiles where id = auth.uid();
 $$;
 
-create or replace function public.rally_is_admin()
+create or replace function private.rally_is_admin()
 returns boolean
 language sql
 stable
 security definer
-set search_path = public
+set search_path = public, private
 as $$
   select coalesce((select role = 'admin' from public.profiles where id = auth.uid()), false);
 $$;
 
-revoke all on function public.rally_team() from public;
-revoke all on function public.rally_is_admin() from public;
-grant execute on function public.rally_team() to authenticated;
-grant execute on function public.rally_is_admin() to authenticated;
+revoke all on function private.handle_rally_user() from public, anon, authenticated;
+revoke all on function private.rally_team() from public, anon;
+revoke all on function private.rally_is_admin() from public, anon;
+grant execute on function private.rally_team() to authenticated;
+grant execute on function private.rally_is_admin() to authenticated;
 
 alter table public.profiles enable row level security;
 alter table public.team_progress enable row level security;
@@ -114,41 +96,35 @@ alter table public.station_progress enable row level security;
 
 drop policy if exists "profile own or admin" on public.profiles;
 create policy "profile own or admin"
-on public.profiles for select
-to authenticated
-using (id = auth.uid() or public.rally_is_admin());
+on public.profiles for select to authenticated
+using (id = auth.uid() or private.rally_is_admin());
 
 drop policy if exists "all authenticated can see team scoreboard" on public.team_progress;
 create policy "all authenticated can see team scoreboard"
-on public.team_progress for select
-to authenticated
+on public.team_progress for select to authenticated
 using (true);
 
 drop policy if exists "team can update own progress" on public.team_progress;
 create policy "team can update own progress"
-on public.team_progress for update
-to authenticated
-using (team = public.rally_team() or public.rally_is_admin())
-with check (team = public.rally_team() or public.rally_is_admin());
+on public.team_progress for update to authenticated
+using (team = private.rally_team() or private.rally_is_admin())
+with check (team = private.rally_team() or private.rally_is_admin());
 
 drop policy if exists "team can see own stations" on public.station_progress;
 create policy "team can see own stations"
-on public.station_progress for select
-to authenticated
-using (team = public.rally_team() or public.rally_is_admin());
+on public.station_progress for select to authenticated
+using (team = private.rally_team() or private.rally_is_admin());
 
 drop policy if exists "team can insert own stations" on public.station_progress;
 create policy "team can insert own stations"
-on public.station_progress for insert
-to authenticated
-with check (team = public.rally_team() or public.rally_is_admin());
+on public.station_progress for insert to authenticated
+with check (team = private.rally_team() or private.rally_is_admin());
 
 drop policy if exists "team can update own stations" on public.station_progress;
 create policy "team can update own stations"
-on public.station_progress for update
-to authenticated
-using (team = public.rally_team() or public.rally_is_admin())
-with check (team = public.rally_team() or public.rally_is_admin());
+on public.station_progress for update to authenticated
+using (team = private.rally_team() or private.rally_is_admin())
+with check (team = private.rally_team() or private.rally_is_admin());
 
 revoke all on public.profiles from anon, authenticated;
 revoke all on public.team_progress from anon, authenticated;
