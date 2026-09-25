@@ -66,5 +66,8 @@ function renderGame(){const target=currentTarget();const progress=Math.round((st
 function render(){const app=document.getElementById("app");if(!state.loggedIn){app.innerHTML=renderLogin();document.getElementById("loginBtn").addEventListener("click",login);document.getElementById("password").addEventListener("keydown",e=>{if(e.key==="Enter")login()});return}if(state.step>=TARGETS.length){app.innerHTML=renderFinished();document.getElementById("resetBtn").addEventListener("click",resetAll);return}app.innerHTML=renderGame();document.getElementById("checkBtn").addEventListener("click",checkLocation);document.getElementById("hintBtn").addEventListener("click",useHint);document.getElementById("nextBtn").addEventListener("click",nextStation);document.getElementById("resetBtn").addEventListener("click",resetAll);document.getElementById("demoMode").addEventListener("change",e=>{state.demoMode=e.target.checked;save()});document.getElementById("simulateWrong").addEventListener("change",e=>{state.simulateWrong=e.target.checked;save()})}
 render();
 </script>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
+<script src="supabase-integration.js"></script>
 </body>
 </html>
