@@ -80,6 +80,32 @@ async function setGpsBypass(team,enabled){
  if(error){alert("Freigabe konnte nicht gesetzt werden.");console.error(error);return}
  await renderAdminDashboard();
 }
+
+async function resetTeamProgress(team){
+ if(!confirm("Fortschritt von Team "+team+" wirklich komplett zurücksetzen?")) return;
+
+ const [a,b,c1,d] = await Promise.all([
+   rallySupabase.from("team_answers").delete().eq("team",team),
+   rallySupabase.from("station_progress").delete().eq("team",team),
+   rallySupabase.from("admin_controls").update({gps_bypass_once:false,updated_at:new Date().toISOString()}).eq("team",team),
+   rallySupabase.from("team_progress").update({
+     current_station:0,
+     hints:0,
+     attempts:0,
+     finished:false,
+     phase:"question",
+     branch_from_station:null,
+     correct_answers:0,
+     detours:0,
+     updated_at:new Date().toISOString()
+   }).eq("team",team)
+ ]);
+
+ const err=a.error||b.error||c1.error||d.error;
+ if(err){alert("Zurücksetzen fehlgeschlagen.");console.error(err);return}
+ alert("Team "+team+" wurde auf Frage 1 zurückgesetzt.");
+ await renderAdminDashboard();
+}
 async function renderAdminDashboard(){
  const app=document.getElementById("app");
  app.innerHTML='<section class="card"><h1>🛰️ Orga-Dashboard</h1><div class="status info">Live-Daten werden geladen …</div></section>';
@@ -108,6 +134,7 @@ async function renderAdminDashboard(){
          <button class="${ctrl.gps_bypass_once?"ghost":"warn"} adminBypassBtn" data-team="${p.team}" data-enabled="${ctrl.gps_bypass_once?"false":"true"}">
            ${ctrl.gps_bypass_once?"Freigabe zurücknehmen":"📍 Nächsten GPS-Check freigeben"}
          </button>
+         <button class="danger adminResetBtn" data-team="${p.team}">↺ Fortschritt zurücksetzen</button>
        </div>
        <p class="small">Letztes Update: ${p.updated_at?new Date(p.updated_at).toLocaleString("de-DE"):"-"}</p>
      </div>`;
@@ -119,6 +146,7 @@ async function renderAdminDashboard(){
      <div class="row"><button class="secondary" id="adminRefreshBtn">↻ Aktualisieren</button><button class="ghost" id="logoutBtn">Abmelden</button></div>
    </section>`;
    document.querySelectorAll(".adminBypassBtn").forEach(b=>b.addEventListener("click",()=>setGpsBypass(b.dataset.team,b.dataset.enabled==="true")));
+   document.querySelectorAll(".adminResetBtn").forEach(b=>b.addEventListener("click",()=>resetTeamProgress(b.dataset.team)));
    document.getElementById("adminRefreshBtn").addEventListener("click",renderAdminDashboard);
    document.getElementById("logoutBtn").addEventListener("click",logoutLive);
  }catch(e){console.error(e);app.innerHTML='<section class="card"><h1>⚠️ Orga-Dashboard</h1><div class="status bad">Dashboard konnte nicht geladen werden.</div><button class="ghost" id="logoutBtn">Abmelden</button></section>';document.getElementById("logoutBtn").addEventListener("click",logoutLive)}
