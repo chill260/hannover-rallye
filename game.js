@@ -193,10 +193,8 @@ function stationForm(s,isNew=false){
    <div><label>Längengrad</label><input id="stationLon" type="number" step="0.000001" value="${s.longitude??9.7385}"></div>
  </div>
  <label>GPS-Radius in Metern</label><input id="stationRadius" type="number" min="20" max="200" value="${s.radius_m??55}">
- <label>Zielhinweis Team A</label><textarea id="stationClueA">${escapeHtml(s.clue_a||"")}</textarea>
- <label>Hinweis Team A</label><textarea id="stationHintA">${escapeHtml(s.hint_a||"")}</textarea>
- <label>Zielhinweis Team B</label><textarea id="stationClueB">${escapeHtml(s.clue_b||"")}</textarea>
- <label>Hinweis Team B</label><textarea id="stationHintB">${escapeHtml(s.hint_b||"")}</textarea>
+ <label>Zielhinweis für beide Teams</label><textarea id="stationClueA">${escapeHtml(s.clue_a||s.clue_b||"")}</textarea>
+ <label>Hilfe-Hinweis für beide Teams</label><textarea id="stationHintA">${escapeHtml(s.hint_a||s.hint_b||"")}</textarea>
  <div id="stationMap"></div>
  <div class="row" style="margin-top:12px">
    <button class="secondary" id="useCurrentLocationBtn">📍 Meinen Standort verwenden</button>
@@ -224,7 +222,7 @@ async function saveStationEditor(){
   latitude:Number(document.getElementById("stationLat").value),longitude:Number(document.getElementById("stationLon").value),
   radius_m:Number(document.getElementById("stationRadius").value),
   clue_a:document.getElementById("stationClueA").value.trim(),hint_a:document.getElementById("stationHintA").value.trim(),
-  clue_b:document.getElementById("stationClueB").value.trim(),hint_b:document.getElementById("stationHintB").value.trim()
+  clue_b:document.getElementById("stationClueA").value.trim(),hint_b:document.getElementById("stationHintA").value.trim()
  };
  if(!row.name||!Number.isFinite(row.latitude)||!Number.isFinite(row.longitude)){alert("Name und gültige Koordinaten fehlen.");return}
  const {error}=await rallySupabase.from("stations").upsert(row,{onConflict:"station_index"});
