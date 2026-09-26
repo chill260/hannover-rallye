@@ -16,14 +16,14 @@ async function loadGame(){
  if(p.role==="admin"){state=freshState();Object.assign(state,{loggedIn:true,username:p.username,team:null,role:"admin",phase:"admin"});dbReady=true;return true}
  if(!p.team){await rallySupabase.auth.signOut();return false}
  const [st,qs,tp,sp,ta]=await Promise.all([
-  rallySupabase.from("stations").select("station_index,name,latitude,longitude,radius_m").order("station_index"),
+  rallySupabase.from("stations").select("station_index,name,latitude,longitude,radius_m,clue_a,clue_b,hint_a,hint_b").order("station_index"),
   rallySupabase.from("route_questions").select("*"),
   rallySupabase.from("team_progress").select("*").eq("team",p.team).single(),
   rallySupabase.from("station_progress").select("*").eq("team",p.team),
   rallySupabase.from("team_answers").select("*").eq("team",p.team)
  ]);
  if(st.error)throw st.error;if(qs.error)throw qs.error;if(tp.error)throw tp.error;if(sp.error)throw sp.error;if(ta.error)throw ta.error;
- for(const r of st.data||[]){if(TARGETS[r.station_index]){Object.assign(TARGETS[r.station_index],{name:r.name,lat:r.latitude,lon:r.longitude,radius:r.radius_m})}}
+ for(const r of st.data||[]){if(!TARGETS[r.station_index])TARGETS[r.station_index]={};Object.assign(TARGETS[r.station_index],{name:r.name,lat:r.latitude,lon:r.longitude,radius:r.radius_m,questionA:r.clue_a,questionB:r.clue_b,hintA:r.hint_a,hintB:r.hint_b})}
  routeQuestions={};for(const q of qs.data||[])routeQuestions[q.from_station_index]=q;
  teamAnswers={};for(const a of ta.data||[])teamAnswers[a.from_station_index]=a;
  const x=tp.data;state=freshState();Object.assign(state,{loggedIn:true,username:p.username,team:p.team,role:p.role||"player",step:x.finished?TARGETS.length:x.current_station,hints:x.hints||0,attempts:x.attempts||0,phase:x.finished?"finished":(x.phase||"question"),branchFromStation:x.branch_from_station,correctAnswers:x.correct_answers||0,detours:x.detours||0});
@@ -196,7 +196,7 @@ async function answerQuestion(sel){
 async function checkMainLocation(){
  const i=state.step,t=TARGETS[i],btn=document.getElementById("checkBtn"),s=document.getElementById("status");btn.disabled=true;s.className="status info";s.textContent="📡 Standort wird geprüft …";await incrementAttempt(i);
  const bypass=await consumeRemoteBypass();
- if(bypass){state.passed[i]=true;await persistStation(i);if(i===TARGETS.length-1){state.step=TARGETS.length;state.phase="finished"}else{state.step=i+1;state.phase="question"}state.branchFromStation=null;saveLocal();renderLive();return}
+ if(bypass){state.passed[i]=true;await persistStation(i);if(i===TARGETS.length-1){state.step=TARGETS.length;state.phase="finished"}else{state.step=i+1;state.phase=routeQuestions[i]?"question":"travel-main"}state.branchFromStation=null;saveLocal();renderLive();return}
  getGps(async(r,m)=>{if(!atPos(r,t.lat,t.lon,t.radius)){s.className="status bad";s.innerHTML="<strong>❌ Noch nicht richtig.</strong><br>"+(m||"Weiter suchen.");btn.disabled=false;return}
  state.passed[i]=true;await persistStation(i);
  if(i===TARGETS.length-1){state.step=TARGETS.length;state.phase="finished"}else{state.step=i+1;state.phase="question"}
