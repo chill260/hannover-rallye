@@ -167,6 +167,8 @@ async function answerQuestion(sel){
 }
 async function checkMainLocation(){
  const i=state.step,t=TARGETS[i],btn=document.getElementById("checkBtn"),s=document.getElementById("status");btn.disabled=true;s.className="status info";s.textContent="📡 Standort wird geprüft …";await incrementAttempt(i);
+ const bypass=await consumeRemoteBypass();
+ if(bypass){state.passed[i]=true;await persistStation(i);if(i===TARGETS.length-1){state.step=TARGETS.length;state.phase="finished"}else{state.step=i+1;state.phase="question"}state.branchFromStation=null;saveLocal();renderLive();return}
  getGps(async(r,m)=>{if(!atPos(r,t.lat,t.lon,t.radius)){s.className="status bad";s.innerHTML="<strong>❌ Noch nicht richtig.</strong><br>"+(m||"Weiter suchen.");btn.disabled=false;return}
  state.passed[i]=true;await persistStation(i);
  if(i===TARGETS.length-1){state.step=TARGETS.length;state.phase="finished"}else{state.step=i+1;state.phase="question"}
@@ -175,6 +177,8 @@ async function checkMainLocation(){
 }
 async function checkDecoyLocation(){
  const from=state.branchFromStation,q=routeQuestions[from],btn=document.getElementById("checkDecoyBtn"),s=document.getElementById("status");btn.disabled=true;s.className="status info";s.textContent="📡 Standort wird geprüft …";state.attempts++;saveLocal();
+ const bypass=await consumeRemoteBypass();
+ if(bypass){await markDetourComplete(from);state.phase="detour-reveal";saveLocal();renderLive();return}
  getGps(async(r,m)=>{if(!atPos(r,q.decoy_latitude,q.decoy_longitude,q.decoy_radius_m)){s.className="status bad";s.innerHTML="<strong>❌ Noch nicht am zugeteilten Ziel.</strong><br>"+(m||"Weiter suchen.");btn.disabled=false;return}await markDetourComplete(from);state.phase="detour-reveal";saveLocal();renderLive()});
 }
 function continueFromDetour(){state.phase="travel-main";saveLocal();renderLive()}
