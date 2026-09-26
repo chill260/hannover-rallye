@@ -2,7 +2,7 @@ const rallyConfig=window.RALLYE_CONFIG||{};
 const rallySupabase=window.supabase.createClient(rallyConfig.supabaseUrl,rallyConfig.supabasePublishableKey);
 let dbReady=false,currentUserId=null,routeQuestions={},teamAnswers={};
 
-function freshState(){return{loggedIn:false,username:null,team:null,step:0,hints:0,attempts:0,passed:{},phase:"question",branchFromStation:null,correctAnswers:0,detours:0,demoMode:false,simulateWrong:false}}
+function freshState(){return{loggedIn:false,username:null,team:null,role:"player",step:0,hints:0,attempts:0,passed:{},phase:"question",branchFromStation:null,correctAnswers:0,detours:0,demoMode:false,simulateWrong:false}}
 function escapeHtml(v){return String(v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;")}
 function questionKey(){return state.step===0?-1:state.step-1}
 function questionForTeam(t){return state.team==="A"?t.questionA:t.questionB}
@@ -12,7 +12,9 @@ async function loadGame(){
  const {data:s}=await rallySupabase.auth.getSession(); if(!s?.session)return false;
  currentUserId=s.session.user.id;
  const {data:p,error:pe}=await rallySupabase.from("profiles").select("username,team,role").eq("id",currentUserId).single();
- if(pe||!p?.team){await rallySupabase.auth.signOut();return false}
+ if(pe||!p){await rallySupabase.auth.signOut();return false}
+ if(p.role==="admin"){state=freshState();Object.assign(state,{loggedIn:true,username:p.username,team:null,role:"admin",phase:"admin"});dbReady=true;return true}
+ if(!p.team){await rallySupabase.auth.signOut();return false}
  const [st,qs,tp,sp,ta]=await Promise.all([
   rallySupabase.from("stations").select("station_index,name,latitude,longitude,radius_m").order("station_index"),
   rallySupabase.from("route_questions").select("*"),
@@ -24,7 +26,7 @@ async function loadGame(){
  for(const r of st.data||[]){if(TARGETS[r.station_index]){Object.assign(TARGETS[r.station_index],{name:r.name,lat:r.latitude,lon:r.longitude,radius:r.radius_m})}}
  routeQuestions={};for(const q of qs.data||[])routeQuestions[q.from_station_index]=q;
  teamAnswers={};for(const a of ta.data||[])teamAnswers[a.from_station_index]=a;
- const x=tp.data;state=freshState();Object.assign(state,{loggedIn:true,username:p.username,team:p.team,step:x.finished?TARGETS.length:x.current_station,hints:x.hints||0,attempts:x.attempts||0,phase:x.finished?"finished":(x.phase||"question"),branchFromStation:x.branch_from_station,correctAnswers:x.correct_answers||0,detours:x.detours||0});
+ const x=tp.data;state=freshState();Object.assign(state,{loggedIn:true,username:p.username,team:p.team,role:p.role||"player",step:x.finished?TARGETS.length:x.current_station,hints:x.hints||0,attempts:x.attempts||0,phase:x.finished?"finished":(x.phase||"question"),branchFromStation:x.branch_from_station,correctAnswers:x.correct_answers||0,detours:x.detours||0});
  for(const r of sp.data||[]){if(r.completed)state.passed[r.station_index]=true;if(r.hint_used)state["hint_"+p.team+"_"+r.station_index]=true}
  localStorage.setItem(KEY,JSON.stringify(state));dbReady=true;return true;
 }
@@ -54,6 +56,73 @@ async function markDetourComplete(from){
  await rallySupabase.from("team_answers").upsert(row,{onConflict:"team,from_station_index"});teamAnswers[from]=row;
 }
 
+
+async function consumeRemoteBypass(){
+ const {data,error}=await rallySupabase.rpc("consume_gps_bypass");
+ if(error){console.error("gps bypass check failed",error);return false}
+ return data===true;
+}
+function phaseLabel(p){
+ const labels={question:"Frage", "travel-main":"Unterwegs zum Ziel","travel-decoy":"Ehrenrunde","detour-reveal":"Auflösung",finished:"Fertig"};
+ return labels[p]||p||"Unbekannt";
+}
+async function loadAdminData(){
+ const [progress,controls,answers]=await Promise.all([
+   rallySupabase.from("team_progress").select("team,current_station,hints,attempts,finished,phase,correct_answers,detours,updated_at").order("team"),
+   rallySupabase.from("admin_controls").select("team,gps_bypass_once,updated_at").order("team"),
+   rallySupabase.from("team_answers").select("team,from_station_index,answer_correct,detour_completed")
+ ]);
+ if(progress.error)throw progress.error;if(controls.error)throw controls.error;if(answers.error)throw answers.error;
+ return {progress:progress.data||[],controls:controls.data||[],answers:answers.data||[]};
+}
+async function setGpsBypass(team,enabled){
+ const {error}=await rallySupabase.from("admin_controls").update({gps_bypass_once:enabled,updated_at:new Date().toISOString()}).eq("team",team);
+ if(error){alert("Freigabe konnte nicht gesetzt werden.");console.error(error);return}
+ await renderAdminDashboard();
+}
+async function renderAdminDashboard(){
+ const app=document.getElementById("app");
+ app.innerHTML='<section class="card"><h1>🛰️ Orga-Dashboard</h1><div class="status info">Live-Daten werden geladen …</div></section>';
+ try{
+   const data=await loadAdminData();
+   const controlMap=Object.fromEntries(data.controls.map(x=>[x.team,x]));
+   const cards=data.progress.map(p=>{
+     const ctrl=controlMap[p.team]||{};
+     const answered=data.answers.filter(a=>a.team===p.team);
+     const right=answered.filter(a=>a.answer_correct).length;
+     const stationText=p.finished?"Ziel erreicht":(p.current_station+1)+" / "+TARGETS.length;
+     return `<div class="mission">
+       <div class="row" style="justify-content:space-between;align-items:center">
+         <h2 style="margin:0">Team ${escapeHtml(p.team)}</h2>
+         <span class="badge">${escapeHtml(phaseLabel(p.phase))}</span>
+       </div>
+       <p><strong>Fortschritt:</strong> ${stationText}<br>
+       <strong>Richtige Antworten:</strong> ${right}<br>
+       <strong>Ehrenrunden:</strong> ${p.detours||0}<br>
+       <strong>Hinweise:</strong> ${p.hints||0}<br>
+       <strong>GPS-Prüfungen:</strong> ${p.attempts||0}</p>
+       <div class="status ${ctrl.gps_bypass_once?"ok":"info"}">
+         ${ctrl.gps_bypass_once?"✅ Nächster GPS-Check wird automatisch akzeptiert.":"GPS-Notfallfreigabe ist aus."}
+       </div>
+       <div class="row" style="margin-top:12px">
+         <button class="${ctrl.gps_bypass_once?"ghost":"warn"} adminBypassBtn" data-team="${p.team}" data-enabled="${ctrl.gps_bypass_once?"false":"true"}">
+           ${ctrl.gps_bypass_once?"Freigabe zurücknehmen":"📍 Nächsten GPS-Check freigeben"}
+         </button>
+       </div>
+       <p class="small">Letztes Update: ${p.updated_at?new Date(p.updated_at).toLocaleString("de-DE"):"-"}</p>
+     </div>`;
+   }).join("");
+   app.innerHTML=`<section class="card">
+     <span class="badge">Admin</span><h1>🛰️ Orga-Dashboard</h1>
+     <p>Hier siehst du beide Teams live und kannst bei GPS-Problemen genau den nächsten Standort-Check freigeben.</p>
+     ${cards}
+     <div class="row"><button class="secondary" id="adminRefreshBtn">↻ Aktualisieren</button><button class="ghost" id="logoutBtn">Abmelden</button></div>
+   </section>`;
+   document.querySelectorAll(".adminBypassBtn").forEach(b=>b.addEventListener("click",()=>setGpsBypass(b.dataset.team,b.dataset.enabled==="true")));
+   document.getElementById("adminRefreshBtn").addEventListener("click",renderAdminDashboard);
+   document.getElementById("logoutBtn").addEventListener("click",logoutLive);
+ }catch(e){console.error(e);app.innerHTML='<section class="card"><h1>⚠️ Orga-Dashboard</h1><div class="status bad">Dashboard konnte nicht geladen werden.</div><button class="ghost" id="logoutBtn">Abmelden</button></section>';document.getElementById("logoutBtn").addEventListener("click",logoutLive)}
+}
 function renderLoginLive(){return `<section class="card"><span class="badge">Live mit Datenbank</span><h1>🌲 Hannover City Challenge</h1><p>Frage beantworten, Ziel bekommen, hinlaufen, GPS prüfen.</p><div class="mission"><strong>Startpunkt</strong><p>${START.text}</p></div><label for="username">Benutzername</label><input id="username" autocomplete="username" placeholder="team-a"><label for="password">Passwort</label><input id="password" type="password" autocomplete="current-password" placeholder="Passwort"><div class="row" style="margin-top:14px"><button class="primary" id="loginBtn">Einloggen</button></div><div id="loginStatus" class="status info">🔐 Supabase-Login aktiv</div></section>`}
 function renderQuestion(){
  const k=questionKey(),q=routeQuestions[k];if(!q)return `<section class="card"><h1>⚠️ Frage fehlt</h1><p>Für diese Etappe ist noch keine Frage hinterlegt.</p></section>`;
@@ -113,6 +182,7 @@ function wireDemo(){const a=document.getElementById("demoMode"),b=document.getEl
 function renderLive(){
  const app=document.getElementById("app");
  if(!state.loggedIn){app.innerHTML=renderLoginLive();document.getElementById("loginBtn").addEventListener("click",loginLive);document.getElementById("password").addEventListener("keydown",e=>{if(e.key==="Enter")loginLive()});return}
+ if(state.role==="admin"){void renderAdminDashboard();return}
  if(state.phase==="finished"||state.step>=TARGETS.length){app.innerHTML=renderFinishedLive();document.getElementById("logoutBtn").addEventListener("click",logoutLive);return}
  if(state.phase==="question"){app.innerHTML=renderQuestion();document.querySelectorAll(".answerBtn").forEach(b=>b.addEventListener("click",()=>answerQuestion(Number(b.dataset.answer))));return}
  if(state.phase==="travel-decoy"){app.innerHTML=renderTravelDecoy();document.getElementById("checkDecoyBtn").addEventListener("click",checkDecoyLocation);wireDemo();return}
