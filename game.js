@@ -41,13 +41,13 @@ function playerHeader(){
 }
 function questionView(){
  const q=player.current||{},wrong=q.wrong_attempts||0,revealed=wrong>=3&&q.solution;
- const mc=q.question_type==="multiple_choice",opts=Array.isArray(q.options)?q.options:[];
- return `<section class="card">${playerHeader()}<h1>${mc?"🎯 Multiple Choice":"🧩 Rätselgeschichte"}</h1>
+ const mc=q.question_type==="multiple_choice",teamTask=q.question_type==="team_challenge",opts=Array.isArray(q.options)?q.options:[];
+ return `<section class="card">${playerHeader()}<h1>${teamTask?"🤝 Teamaufgabe":mc?"🎯 Multiple Choice":"🧩 Rätselgeschichte"}</h1>
  ${q.fun_fact?`<div class="mission"><h3>📍 Hannover-Fakt</h3><p>${esc(q.fun_fact)}</p></div>`:""}
- <div class="mission"><h3>${mc?"Frage":"Der Fall"}</h3><p>${esc(q.question)}</p></div>
+ <div class="mission"><h3>${teamTask?"Gemeinsam lösen":mc?"Frage":"Der Fall"}</h3><p>${esc(q.question)}</p></div>
  ${revealed?`<div class="status bad"><strong>Auflösung</strong><br>${esc(q.solution)}</div><p class="small">Dafür gibt es einen Strafpunkt. Die Route bleibt unverändert.</p><button class="secondary" id="continueRevealBtn">Nächstes Ziel →</button>`:
  mc?`<div style="display:grid;gap:10px">${opts.map((o,i)=>`<button class="ghost mcBtn" data-i="${i}">${String.fromCharCode(65+i)} · ${esc(o)}</button>`).join("")}</div><div class="status info">${wrong?"Fehlversuche: <strong>"+wrong+"</strong>":"Wählt gemeinsam eine Antwort."}</div>${q.hint?`<div class="status info">💡 <strong>Hinweis:</strong> ${esc(q.hint)}</div>`:""}`:
- `<label>Eure Lösung</label><input id="answerText" autocomplete="off" placeholder="Schreibt eure Theorie …"><button class="primary" id="answerBtn" style="margin-top:12px">Lösung prüfen</button><div class="status info">${wrong?"Fehlversuche: <strong>"+wrong+"</strong>":"Diskutiert gemeinsam und gebt eure Lösung ein."}</div>${q.hint?`<div class="status info">💡 <strong>Hinweis:</strong> ${esc(q.hint)}</div>`:""}`}
+ `<label>${teamTask?"Euer gemeinsamer Satz":"Eure Lösung"}</label><input id="answerText" autocomplete="off" placeholder="${teamTask?"Euren Satz eingeben …":"Schreibt eure Theorie …"}"><button class="primary" id="answerBtn" style="margin-top:12px">${teamTask?"Aufgabe erledigt ✓":"Lösung prüfen"}</button><div class="status info">${teamTask?"Hier gibt es bewusst keine falsche Antwort.":wrong?"Fehlversuche: <strong>"+wrong+"</strong>":"Diskutiert gemeinsam und gebt eure Lösung ein."}</div>${q.hint?`<div class="status info">💡 <strong>Hinweis:</strong> ${esc(q.hint)}</div>`:""}`}
  <hr><button class="ghost" id="logoutBtn">Abmelden</button></section>`;
 }
 async function answer(text=null,sel=null){
@@ -99,12 +99,15 @@ async function loadAdminRoute(status="draft"){
  return {route:r,stations:s.data||[],questions:q.data||[]};
 }
 function adminShell(title,body){
- return `<section class="card"><span class="badge">Orga</span><h1>🛠️ ${title}</h1><div class="admin-tabs"><button class="ghost ${adminTab==="teams"?"active":""}" data-tab="teams">📊 Teams</button><button class="ghost ${adminTab==="stations"?"active":""}" data-tab="stations">📍 Stationen</button><button class="ghost ${adminTab==="questions"?"active":""}" data-tab="questions">🧩 Rätsel</button><button class="ghost ${adminTab==="publish"?"active":""}" data-tab="publish">🚀 Veröffentlichen</button></div>${body}<hr><button class="ghost" id="logoutBtn">Abmelden</button></section>`;
+ return `<section class="card"><span class="badge">Orga</span><h1>🛠️ ${title}</h1><div class="admin-tabs"><button class="ghost ${adminTab==="teams"?"active":""}" data-tab="teams">📊 Teams</button><button class="ghost ${adminTab==="stations"?"active":""}" data-tab="stations">📍 Stationen</button><button class="ghost ${adminTab==="questions"?"active":""}" data-tab="questions">🧩 Rätsel</button><button class="ghost ${adminTab==="preview"?"active":""}" data-tab="preview">👁 Vorschau</button><button class="ghost ${adminTab==="publish"?"active":""}" data-tab="publish">🚀 Veröffentlichen</button></div>${body}<hr><button class="ghost" id="logoutBtn">Abmelden</button></section>`;
 }
 function wireAdmin(){
  document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{adminTab=b.dataset.tab;renderAdmin()});
  document.getElementById("logoutBtn")?.addEventListener("click",logout);
 }
+function elapsedMs(r){return r.started_at&&r.finished_at?new Date(r.finished_at)-new Date(r.started_at):null}
+function fmtDuration(ms){if(ms==null)return "läuft";const m=Math.floor(ms/60000),s=Math.floor((ms%60000)/1000);return m+" min "+String(s).padStart(2,"0")+" s"}
+function rankRuns(runs){return [...runs].sort((a,b)=>(a.penalty_points-b.penalty_points)||(a.hints-b.hints)||((elapsedMs(a)??Infinity)-(elapsedMs(b)??Infinity)))}
 async function renderTeams(){
  const [runs,controls]=await Promise.all([
   db.from("rally_team_runs").select("*").order("team"),
@@ -112,7 +115,7 @@ async function renderTeams(){
  ]);
  if(runs.error)throw runs.error;if(controls.error)throw controls.error;
  const cm=Object.fromEntries((controls.data||[]).map(x=>[x.team,x]));
- const body=(runs.data||[]).map(r=>`<div class="mission"><div class="row" style="justify-content:space-between"><h2>Team ${r.team}</h2><span class="badge">${esc(r.phase)}</span></div><p>✅ Gelöst: <strong>${r.correct_answers}</strong><br>⚠️ Strafpunkte: <strong>${r.penalty_points}</strong><br>💡 Hinweise: <strong>${r.hints}</strong><br>📍 GPS: <strong>${r.gps_attempts}</strong></p><div class="row"><button class="warn bypassBtn" data-team="${r.team}" data-on="${cm[r.team]?.gps_bypass_once?"0":"1"}">${cm[r.team]?.gps_bypass_once?"GPS-Freigabe zurücknehmen":"Nächsten GPS-Check freigeben"}</button><button class="danger resetTeamBtn" data-team="${r.team}">↺ Team zurücksetzen</button></div></div>`).join("");
+ const ranking=rankRuns(runs.data||[]); const places=Object.fromEntries(ranking.map((r,i)=>[r.team,i+1]));\n const body=(runs.data||[]).map(r=>`<div class="mission"><div class="row" style="justify-content:space-between"><h2>Team ${r.team}</h2><span class="badge">${esc(r.phase)}</span></div><p>🏆 Rang: <strong>${places[r.team]||"-"}</strong><br>✅ Gelöst: <strong>${r.correct_answers}</strong><br>⚠️ Strafpunkte: <strong>${r.penalty_points}</strong><br>💡 Hinweise: <strong>${r.hints}</strong><br>⏱️ Zeit: <strong>${fmtDuration(elapsedMs(r))}</strong><br>📍 GPS: <strong>${r.gps_attempts}</strong></p><div class="row"><button class="warn bypassBtn" data-team="${r.team}" data-on="${cm[r.team]?.gps_bypass_once?"0":"1"}">${cm[r.team]?.gps_bypass_once?"GPS-Freigabe zurücknehmen":"Nächsten GPS-Check freigeben"}</button><button class="danger resetTeamBtn" data-team="${r.team}">↺ Team zurücksetzen</button></div></div>`).join("");
  app().innerHTML=adminShell("Orga-Dashboard",body||'<div class="status info">Noch keine Teamläufe vorhanden.</div>');wireAdmin();
  document.querySelectorAll(".bypassBtn").forEach(b=>b.onclick=async()=>{await db.from("admin_controls").update({gps_bypass_once:b.dataset.on==="1",updated_at:new Date().toISOString()}).eq("team",b.dataset.team);renderAdmin()});
  document.querySelectorAll(".resetTeamBtn").forEach(b=>b.onclick=()=>resetTeam(b.dataset.team));
@@ -125,7 +128,7 @@ async function resetTeam(team){
   db.from("rally_team_question_progress").delete().eq("team",team),
   db.from("admin_controls").update({gps_bypass_once:false,updated_at:new Date().toISOString()}).eq("team",team)
  ]);
- await db.from("rally_team_runs").update({route_id:pub.route.id,phase:"question",current_question_id:first.question_id,current_station_id:null,correct_answers:0,penalty_points:0,hints:0,gps_attempts:0,finished:false,updated_at:new Date().toISOString()}).eq("team",team);
+ await db.from("rally_team_runs").update({route_id:pub.route.id,phase:"question",current_question_id:first.question_id,current_station_id:null,correct_answers:0,penalty_points:0,hints:0,gps_attempts:0,finished:false,started_at:null,finished_at:null,updated_at:new Date().toISOString()}).eq("team",team);
  renderAdmin();
 }
 function initMap(lat,lon){
@@ -176,10 +179,35 @@ async function renderQuestions(selected=null){
  document.getElementById("saveQBtn").onclick=async()=>{const id=document.getElementById("qId").value||uuid(),type=document.getElementById("qType").value,options=type==="multiple_choice"?[...document.querySelectorAll(".mcOpt")].map(x=>x.value.trim()).filter(Boolean):null,checked=document.querySelector('input[name="correct"]:checked'),accepted=document.getElementById("accepted").value.split("\n").map(x=>x.trim()).filter(Boolean);if(type==="multiple_choice"&&(!checked||options.length<2)){alert("Bitte mindestens zwei Antworten und eine richtige markieren.");return}if(type==="free_text"&&!accepted.length){alert("Bitte mindestens einen Lösungsbegriff eintragen.");return}const row={route_id:d.route.id,question_id:id,from_station_id:document.getElementById("qFrom").value||null,target_station_id:document.getElementById("qTarget").value,question_type:type,fun_fact:document.getElementById("qFact").value.trim(),question:document.getElementById("qText").value.trim(),options,hint_text:document.getElementById("qHint").value.trim(),updated_at:new Date().toISOString()};const {error}=await db.from("rally_questions").upsert(row,{onConflict:"route_id,question_id"});if(error){alert(error.message);return}const sr=await db.rpc("admin_save_answer_config",{p_route_id:d.route.id,p_question_id:id,p_accepted_answers:accepted,p_correct_option:type==="multiple_choice"?Number(checked.value):null,p_solution_text:document.getElementById("qSolution").value.trim()});if(sr.error){alert(sr.error.message);return}renderQuestions(id)};
  if(cur.question_id)document.getElementById("delQBtn").onclick=async()=>{if(!confirm("Rätsel wirklich löschen?"))return;await db.from("rally_questions").delete().eq("route_id",d.route.id).eq("question_id",cur.question_id);renderQuestions()};
 }
+
+async function draftSecrets(draft){const out={};for(const q of draft.questions)out[q.question_id]=await getSecret(draft.route.id,q.question_id);return out}
+function validateDraft(draft,secrets){
+ const errors=[],warnings=[],stations=draft?.stations||[],questions=draft?.questions||[];
+ if(stations.length<2)errors.push("Mindestens zwei Stationen erforderlich.");
+ const orders=stations.map(s=>s.sort_order);if(orders.some((v,i)=>v!==i))errors.push("Stationsreihenfolge enthält Lücken oder Duplikate.");
+ const starts=questions.filter(q=>q.from_station_id===null);if(starts.length!==1)errors.push("Es muss genau ein Starträtsel geben.");
+ const qByFrom=new Map(questions.filter(q=>q.from_station_id).map(q=>[q.from_station_id,q]));
+ stations.slice(0,-1).forEach((s,i)=>{const q=qByFrom.get(s.station_id);if(!q)errors.push("Nach „"+s.name+"“ fehlt ein Rätsel.");else if(q.target_station_id!==stations[i+1].station_id)errors.push("Rätsel nach „"+s.name+"“ führt nicht zur direkt nächsten Station.")});
+ questions.forEach(q=>{const sec=secrets[q.question_id]||{};if(!q.question?.trim())errors.push("Ein Rätsel hat keinen Fragetext.");if(!q.target_station_id)errors.push("Ein Rätsel hat kein Ziel.");if(q.question_type==="free_text"&&!(sec.accepted_answers||[]).length)errors.push("Freitext-Rätsel ohne akzeptierte Lösung.");if(q.question_type==="multiple_choice"){if(!Array.isArray(q.options)||q.options.length<2)errors.push("Multiple Choice braucht mindestens zwei Antworten.");if(sec.correct_option==null||sec.correct_option<0||sec.correct_option>=q.options.length)errors.push("Multiple Choice ohne gültige richtige Antwort.")}if(q.question_type==="team_challenge"&&!q.question?.trim())errors.push("Teamaufgabe ohne Text.")});
+ stations.forEach(s=>{if(!s.clue?.trim())warnings.push("Station „"+s.name+"“ hat keinen Zielhinweis.");if(s.radius_m<35)warnings.push("GPS-Radius bei „"+s.name+"“ ist mit "+s.radius_m+" m recht knapp.");if(s.radius_m>100)warnings.push("GPS-Radius bei „"+s.name+"“ ist mit "+s.radius_m+" m sehr großzügig.")});
+ return {errors:[...new Set(errors)],warnings:[...new Set(warnings)]};
+}
+let previewIndex=0;
+async function renderPreview(){
+ const d=await loadAdminRoute("draft");if(!d){app().innerHTML=adminShell("Vorschau",'<div class="status bad">Kein Entwurf vorhanden.</div>');wireAdmin();return}
+ const seq=[];const start=d.questions.find(q=>q.from_station_id===null);if(start)seq.push({kind:"question",q:start});for(const s of d.stations){seq.push({kind:"station",s});const q=d.questions.find(x=>x.from_station_id===s.station_id);if(q)seq.push({kind:"question",q})}
+ previewIndex=Math.max(0,Math.min(previewIndex,seq.length-1));const item=seq[previewIndex];
+ let body='<div class="status info">Entwurfs-Testlauf '+(previewIndex+1)+' / '+seq.length+'</div>';
+ if(item?.kind==="station")body+=`<div class="mission"><span class="badge">Ziel ${item.s.sort_order+1}/${d.stations.length}</span><h2>🧭 Spieleransicht</h2><p>${esc(item.s.clue)}</p><div class="small">Orga-Test: GPS wird hier bewusst nicht geprüft.</div></div>`;
+ if(item?.kind==="question"){const q=item.q;body+=`<div class="mission"><span class="badge">${esc(q.question_type)}</span><h2>${q.question_type==="team_challenge"?"🤝 Teamaufgabe":q.question_type==="multiple_choice"?"🎯 Multiple Choice":"🧩 Rätsel"}</h2>${q.fun_fact?`<div class="status info">📍 ${esc(q.fun_fact)}</div>`:""}<p>${esc(q.question)}</p>${Array.isArray(q.options)?q.options.map((o,i)=>`<div class="admin-item">${String.fromCharCode(65+i)} · ${esc(o)}</div>`).join(""):""}</div>`}
+ body+=`<div class="row"><button class="ghost" id="prevPreview" ${previewIndex===0?"disabled":""}>← Zurück</button><button class="secondary" id="nextPreview" ${previewIndex===seq.length-1?"disabled":""}>Weiter →</button></div>`;
+ app().innerHTML=adminShell("Entwurf testen",body);wireAdmin();document.getElementById("prevPreview").onclick=()=>{previewIndex--;renderPreview()};document.getElementById("nextPreview").onclick=()=>{previewIndex++;renderPreview()};
+}
 async function renderPublish(){
- const [draft,pub]=await Promise.all([loadAdminRoute("draft"),loadAdminRoute("published")]);
- const body=`<p>Änderungen im Editor betreffen nur den <strong>Entwurf</strong>. Die Teams spielen weiter die veröffentlichte Version.</p><div class="mission"><h2>Live</h2><p>${pub?esc(pub.route.name):"Keine veröffentlichte Route"}<br>${pub?pub.stations.length:0} Stationen · ${pub?pub.questions.length:0} Rätsel</p></div><div class="mission"><h2>Entwurf</h2><p>${draft?esc(draft.route.name):"Kein Entwurf"}<br>${draft?draft.stations.length:0} Stationen · ${draft?draft.questions.length:0} Rätsel</p></div><button class="primary" id="publishBtn" ${draft?"":"disabled"}>🚀 Entwurf veröffentlichen</button><div class="status info">Veröffentlichen setzt beide Teams auf den Start der neuen Version zurück.</div>`;
- app().innerHTML=adminShell("Veröffentlichen",body);wireAdmin();document.getElementById("publishBtn")?.addEventListener("click",()=>publishDraft(draft,pub));
+ const [draft,pub]=await Promise.all([loadAdminRoute("draft"),loadAdminRoute("published")]);const secrets=draft?await draftSecrets(draft):{};const check=draft?validateDraft(draft,secrets):{errors:["Kein Entwurf vorhanden."],warnings:[]};
+ const checks=[...check.errors.map(x=>"❌ "+x),...check.warnings.map(x=>"⚠️ "+x)];if(!checks.length)checks.push("✅ Route ist vollständig und bereit zum Veröffentlichen.");
+ const body=`<p>Änderungen im Editor betreffen nur den <strong>Entwurf</strong>. Die Teams spielen weiter die veröffentlichte Version.</p><div class="mission"><h2>Live</h2><p>${pub?esc(pub.route.name):"Keine veröffentlichte Route"}<br>${pub?pub.stations.length:0} Stationen · ${pub?pub.questions.length:0} Rätsel</p></div><div class="mission"><h2>Entwurf</h2><p>${draft?esc(draft.route.name):"Kein Entwurf"}<br>${draft?draft.stations.length:0} Stationen · ${draft?draft.questions.length:0} Rätsel</p></div><div class="mission"><h2>🔍 Rallye prüfen</h2>${checks.map(x=>`<div>${esc(x)}</div>`).join("")}</div><div class="row"><button class="secondary" id="previewFromPublish">👁 Entwurf testen</button><button class="primary" id="publishBtn" ${check.errors.length?"disabled":""}>🚀 Entwurf veröffentlichen</button></div><div class="status info">Veröffentlichen setzt beide Teams auf den Start der neuen Version zurück.</div>`;
+ app().innerHTML=adminShell("Veröffentlichen",body);wireAdmin();document.getElementById("previewFromPublish")?.addEventListener("click",()=>{adminTab="preview";previewIndex=0;renderPreview()});document.getElementById("publishBtn")?.addEventListener("click",()=>publishDraft(draft,pub));
 }
 async function publishDraft(draft,pub){
  if(!draft||!confirm("Entwurf wirklich veröffentlichen? Beide Teams starten danach neu."))return;
@@ -190,11 +218,11 @@ async function publishDraft(draft,pub){
  const newId=cr.data;
  if(draft.stations.length){const rows=draft.stations.map(({route_id,created_at,updated_at,...s})=>({...s,route_id:newId,updated_at:new Date().toISOString()}));const x=await db.from("rally_stations").insert(rows);if(x.error){alert(x.error.message);return}}
  if(draft.questions.length){const rows=draft.questions.map(({route_id,created_at,updated_at,...q})=>({...q,route_id:newId,updated_at:new Date().toISOString()}));const x=await db.from("rally_questions").insert(rows);if(x.error){alert(x.error.message);return}for(const q of draft.questions){const s=secrets[q.question_id]||{};await db.rpc("admin_save_answer_config",{p_route_id:newId,p_question_id:q.question_id,p_accepted_answers:s.accepted_answers||[],p_correct_option:s.correct_option??null,p_solution_text:s.solution_text||""})}}
- const first=draft.questions.find(q=>q.from_station_id===null);for(const team of ["A","B"]){await db.from("rally_team_station_progress").delete().eq("team",team);await db.from("rally_team_question_progress").delete().eq("team",team);await db.from("rally_team_runs").update({route_id:draft.route.id,phase:"question",current_question_id:first?.question_id||null,current_station_id:null,correct_answers:0,penalty_points:0,hints:0,gps_attempts:0,finished:false,updated_at:new Date().toISOString()}).eq("team",team)}
+ const first=draft.questions.find(q=>q.from_station_id===null);for(const team of ["A","B"]){await db.from("rally_team_station_progress").delete().eq("team",team);await db.from("rally_team_question_progress").delete().eq("team",team);await db.from("rally_team_runs").update({route_id:draft.route.id,phase:"question",current_question_id:first?.question_id||null,current_station_id:null,correct_answers:0,penalty_points:0,hints:0,gps_attempts:0,finished:false,started_at:null,finished_at:null,updated_at:new Date().toISOString()}).eq("team",team)}
  alert("Neue Rallye-Version ist live.");renderPublish();
 }
 async function renderAdmin(){
- try{if(adminTab==="stations")return renderStations();if(adminTab==="questions")return renderQuestions();if(adminTab==="publish")return renderPublish();return renderTeams()}
+ try{if(adminTab==="stations")return renderStations();if(adminTab==="questions")return renderQuestions();if(adminTab==="preview")return renderPreview();if(adminTab==="publish")return renderPublish();return renderTeams()}
  catch(e){console.error(e);app().innerHTML=adminShell("Orga-Dashboard",'<div class="status bad">Der Orga-Bereich konnte nicht geladen werden.</div>');wireAdmin()}
 }
 function render(){
