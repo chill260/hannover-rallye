@@ -49,14 +49,32 @@ create table if not exists public.rally_questions (
   question text not null,
   options jsonb,
   hint_text text,
+  difficulty text not null default 'medium' check (difficulty in ('easy','medium','hard')),
+  question_style text not null default 'standard' check (question_style in ('standard','quirky','team')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key(route_id,question_id),
   foreign key(route_id,from_station_id) references public.rally_stations(route_id,station_id) on delete cascade,
   foreign key(route_id,target_station_id) references public.rally_stations(route_id,station_id) on delete cascade
 );
-create unique index if not exists rally_question_after_station_unique
-  on public.rally_questions(route_id,coalesce(from_station_id,'00000000-0000-0000-0000-000000000000'::uuid));
+create table if not exists public.rally_question_pools (
+  route_id uuid not null references public.rally_routes(id) on delete cascade,
+  pool_id uuid not null default gen_random_uuid(),
+  from_station_id uuid,
+  target_station_id uuid not null,
+  selection_count integer not null default 1,
+  easy_count integer not null default 0,
+  hard_count integer not null default 0,
+  quirky_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key(route_id,pool_id),
+  foreign key(route_id,from_station_id) references public.rally_stations(route_id,station_id) on delete cascade,
+  foreign key(route_id,target_station_id) references public.rally_stations(route_id,station_id) on delete cascade,
+  check (easy_count + hard_count + quirky_count <= selection_count)
+);
+create unique index if not exists rally_question_pool_checkpoint_unique
+  on public.rally_question_pools(route_id,coalesce(from_station_id,'00000000-0000-0000-0000-000000000000'::uuid));
 
 create table if not exists private.rally_question_secrets (
   route_id uuid not null,
@@ -97,6 +115,20 @@ create table if not exists public.rally_team_station_progress (
   foreign key(route_id,station_id) references public.rally_stations(route_id,station_id) on delete cascade
 );
 
+create table if not exists public.rally_team_question_queue (
+  team text not null check(team in ('A','B')),
+  route_id uuid not null,
+  pool_id uuid not null,
+  question_id uuid not null,
+  position integer not null check(position >= 1),
+  completed boolean not null default false,
+  created_at timestamptz not null default now(),
+  primary key(team,route_id,pool_id,question_id),
+  unique(team,route_id,pool_id,position),
+  foreign key(route_id,pool_id) references public.rally_question_pools(route_id,pool_id) on delete cascade,
+  foreign key(route_id,question_id) references public.rally_questions(route_id,question_id) on delete cascade
+);
+
 create table if not exists public.rally_team_question_progress (
   team text not null check (team in ('A','B')),
   route_id uuid not null,
@@ -115,7 +147,7 @@ create table if not exists public.rally_team_question_progress (
 -- 1. Admin reads/edits route content directly, but only draft rows are editable.
 -- 2. Players do not directly select route/station/question tables.
 -- 3. Players do not directly update run/progress tables.
--- 4. Player state, answer checking, hints and GPS checks are exposed only through authenticated RPCs.
+-- 4. Player state, pool selection, answer checking, hints and GPS checks are exposed only through authenticated RPCs.
 -- 5. private.rally_question_secrets is not directly granted to browser roles.
 --
 -- RPCs used by game.js:
@@ -124,11 +156,13 @@ create table if not exists public.rally_team_question_progress (
 --   continue_rally_after_reveal(uuid)
 --   check_rally_location(uuid,double precision,double precision,double precision)
 --   use_rally_station_hint(uuid)
+-- Question-pool helpers are private and persist a stable random queue per team/run.
 -- Admin RPCs:
 --   admin_get_answer_config(uuid,uuid)
 --   admin_save_answer_config(uuid,uuid,jsonb,integer,text)
 --   admin_set_route_status(uuid,text)
 --   admin_create_route(text,text)
+--   admin_reset_rally_team(text)
 --
 -- Legacy tables public.stations/public.route_questions remain only for migration history.
 -- Restrictive RLS prevents player reads from those tables.
