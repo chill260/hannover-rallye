@@ -44,7 +44,7 @@ create table if not exists public.rally_questions (
   question_id uuid not null default gen_random_uuid(),
   from_station_id uuid,
   target_station_id uuid not null,
-  question_type text not null default 'free_text' check (question_type in ('free_text','multiple_choice')),
+  question_type text not null default 'free_text' check (question_type in ('free_text','multiple_choice','team_challenge')),
   fun_fact text,
   question text not null,
   options jsonb,
@@ -79,6 +79,8 @@ create table if not exists public.rally_team_runs (
   hints integer not null default 0,
   gps_attempts integer not null default 0,
   finished boolean not null default false,
+  started_at timestamptz,
+  finished_at timestamptz,
   updated_at timestamptz not null default now()
 );
 
